@@ -21,6 +21,16 @@ def test_basic_typed_dict():
     assert m.td == d
 
 
+def test_typed_dict_non_dict_value():
+    TD = TypedDict('TD', {'a': int, 'b': str})
+
+    class Model(BaseModel):
+        td: TD
+
+    with pytest.raises(ValidationError):
+        Model(td='123')
+
+
 def test_typed_dict_extra_keys():
     TD = TypedDict('TD', {'a': int, 'b': str})
 
