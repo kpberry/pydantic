@@ -22,12 +22,6 @@ from typing import (
     Union,
 )
 
-try:
-    # TypedDict was part of typing-extensions for python<=3.6
-    from typing import _TypedDictMeta
-except ImportError:
-    from typing_extensions import _TypedDictMeta
-
 from . import errors as errors_
 from .class_validators import Validator, make_generic_validator, prep_validators
 from .error_wrappers import ErrorWrapper
@@ -428,8 +422,9 @@ class ModelField(Representation):
 
         # TypedDict is special. Because TypedDict does not support isinstance
         # checks, we need to handle it before doing the origin checks.
-        if issubclass(self.type_.__class__, _TypedDictMeta):
-            self.key_field = self._create_sub_type(str, f'key_{self.name}', for_keys=True)
+        # mypy also does not allow importing protected members, so we have to
+        # check against the string class name.
+        if self.type_.__class__.__name__ == '_TypedDictMeta':
             self.sub_fields = []
             for k, t in self.type_.__annotations__.items():
                 # each value in a TypedDict has a specific key and type, which
