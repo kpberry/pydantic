@@ -22,6 +22,12 @@ from typing import (
     Union,
 )
 
+try:
+    # TypedDict was part of typing-extensions for python<=3.6
+    from typing import _TypedDictMeta
+except ImportError:
+    from typing_extensions import _TypedDictMeta
+
 from . import errors as errors_
 from .class_validators import Validator, make_generic_validator, prep_validators
 from .error_wrappers import ErrorWrapper
@@ -210,6 +216,7 @@ SHAPE_FROZENSET = 8
 SHAPE_ITERABLE = 9
 SHAPE_GENERIC = 10
 SHAPE_DEQUE = 11
+SHAPE_TYPED_DICT = 12
 SHAPE_NAME_LOOKUP = {
     SHAPE_LIST: 'List[{}]',
     SHAPE_SET: 'Set[{}]',
@@ -227,6 +234,7 @@ class ModelField(Representation):
         'outer_type_',
         'sub_fields',
         'key_field',
+        'key_name',
         'validators',
         'pre_validators',
         'post_validators',
@@ -275,6 +283,7 @@ class ModelField(Representation):
         self.validate_always: bool = False
         self.sub_fields: Optional[List[ModelField]] = None
         self.key_field: Optional[ModelField] = None
+        self.key_name: Optional[str] = None
         self.validators: 'ValidatorsList' = []
         self.pre_validators: Optional['ValidatorsList'] = None
         self.post_validators: Optional['ValidatorsList'] = None
@@ -415,6 +424,20 @@ class ModelField(Representation):
             # python 3.7 only, Pattern is a typing object but without sub fields
             return
         elif is_literal_type(self.type_):
+            return
+
+        # TypedDict is special. Because TypedDict does not support isinstance
+        # checks, we need to handle it before doing the origin checks.
+        if issubclass(self.type_.__class__, _TypedDictMeta):
+            self.key_field = self._create_sub_type(str, f'key_{self.name}', for_keys=True)
+            self.sub_fields = []
+            for k, t in self.type_.__annotations__.items():
+                # each value in a TypedDict has a specific key and type, which
+                # we need to check
+                sub_type = self._create_sub_type(t, f'{self.name}_{k}')
+                sub_type.key_name = k
+                self.sub_fields.append(sub_type)
+            self.shape = SHAPE_TYPED_DICT
             return
 
         origin = get_origin(self.type_)
@@ -585,6 +608,8 @@ class ModelField(Representation):
             v, errors = self._validate_iterable(v, values, loc, cls)
         elif self.shape == SHAPE_GENERIC:
             v, errors = self._apply_validators(v, values, loc, cls, self.validators)
+        elif self.shape == SHAPE_TYPED_DICT:
+            v, errors = self._validate_typeddict(v, values, loc, cls)
         else:
             #  sequence, list, set, generator, tuple with ellipsis, frozen set
             v, errors = self._validate_sequence_like(v, values, loc, cls)
@@ -712,6 +737,46 @@ class ModelField(Representation):
 
             v_loc = *loc, k
             value_result, value_errors = self._validate_singleton(v_, values, v_loc, cls)
+            if value_errors:
+                errors.append(value_errors)
+                continue
+
+            result[key_result] = value_result
+        if errors:
+            return v, errors
+        else:
+            return result, None
+
+    def _validate_typeddict(
+            self, v: Any, values: Dict[str, Any], loc: 'LocStr', cls: Optional['ModelOrDc']
+    ) -> 'ValidateReturn':
+        try:
+            # TypedDict instance is indistinguishable from dict at runtime
+            v_dict = dict_validator(v)
+        except TypeError as exc:
+            return v, ErrorWrapper(exc, loc)
+
+        # TypedDict instance is expected to have all annotated keys
+        sub_field_keys = [field.key_name for field in self.sub_fields]
+        expected_keys = set(sub_field_keys)
+        actual_keys = set(v_dict.keys())
+        if not expected_keys.issubset(actual_keys):
+            raise errors_.DictMissingKeysError(expected_keys=expected_keys, actual_keys=actual_keys)
+
+        loc = loc if isinstance(loc, tuple) else (loc,)
+        result, errors = {}, []
+        for field in self.sub_fields:
+            k = field.key_name
+            v_ = v_dict[k]
+
+            v_loc = *loc, '__key__'
+            key_result, key_errors = self.key_field.validate(k, values, loc=v_loc, cls=cls)  # type: ignore
+            if key_errors:
+                errors.append(key_errors)
+                continue
+
+            v_loc = *loc, k
+            value_result, value_errors = field.validate(v_, values, loc=v_loc, cls=cls)
             if value_errors:
                 errors.append(value_errors)
                 continue

@@ -172,6 +172,13 @@ class DictError(PydanticTypeError):
     msg_template = 'value is not a valid dict'
 
 
+class DictMissingKeysError(PydanticValueError):
+    msg_template = 'wrong dict keys {actual_keys}, expected at least {expected_keys}'
+
+    def __init__(self, *, actual_keys: Set[str], expected_keys: Set[str]) -> None:
+        super().__init__(actual_keys=sorted(actual_keys), expected_keys=sorted(expected_keys))
+
+
 class EmailError(PydanticValueError):
     msg_template = 'value is not a valid email address'
 
