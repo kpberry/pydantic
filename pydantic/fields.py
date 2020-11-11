@@ -748,7 +748,7 @@ class ModelField(Representation):
             return result, None
 
     def _validate_typeddict(
-            self, v: Any, values: Dict[str, Any], loc: 'LocStr', cls: Optional['ModelOrDc']
+        self, v: Any, values: Dict[str, Any], loc: 'LocStr', cls: Optional['ModelOrDc']
     ) -> 'ValidateReturn':
         try:
             # TypedDict instance is indistinguishable from dict at runtime
