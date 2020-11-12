@@ -425,6 +425,7 @@ class ModelField(Representation):
         # mypy also does not allow importing protected members, so we have to
         # check against the string class name.
         if self.type_.__class__.__name__ == '_TypedDictMeta':
+            total = not hasattr(self.type_, '__total__') or self.type_.__total__
             # each value in a TypedDict has a specific key and type, which
             # we need to check
             self.sub_fields = []
@@ -432,6 +433,7 @@ class ModelField(Representation):
                 sub_type = self._create_sub_type(t, f'{self.name}_{k}')
                 # TypedDict keys must be strings
                 sub_type.key_name = str(k)
+                sub_type.required = total
                 self.sub_fields.append(sub_type)
             self.shape = SHAPE_TYPED_DICT
             return
@@ -755,8 +757,8 @@ class ModelField(Representation):
         sub_fields = self.sub_fields or []
 
         # TypedDict instance is expected to have all annotated keys
-        sub_field_keys = [field.key_name for field in sub_fields if field.key_name]
-        expected_keys = set(sub_field_keys)
+        required_sub_field_keys = [field.key_name for field in sub_fields if field.key_name and field.required]
+        expected_keys = set(required_sub_field_keys)
         actual_keys = set(v_dict.keys())
         if not expected_keys.issubset(actual_keys):
             raise errors_.DictMissingKeysError(expected_keys=expected_keys, actual_keys=actual_keys)
@@ -767,15 +769,19 @@ class ModelField(Representation):
             k = field.key_name
             if k is not None:
                 k = str(k)
-                v_ = v_dict[k]
+                # we've already validated that all required keys are in the
+                # dict, so any missing keys were not required and shouldn't
+                # cause an error
+                if k in v_dict:
+                    v_ = v_dict[k]
 
-                v_loc = *loc, k
-                value_result, value_errors = field.validate(v_, values, loc=v_loc, cls=cls)
-                if value_errors:
-                    errors.append(value_errors)
-                    continue
+                    v_loc = *loc, k
+                    value_result, value_errors = field.validate(v_, values, loc=v_loc, cls=cls)
+                    if value_errors:
+                        errors.append(value_errors)
+                        continue
 
-                result[k] = value_result
+                    result[k] = value_result
         if errors:
             return v, errors
         else:

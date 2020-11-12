@@ -21,6 +21,18 @@ def test_basic_typed_dict():
     assert m.td == d
 
 
+def test_non_total_typed_dict():
+    TD = TypedDict('TD', {'a': int, 'b': str}, total=False)
+
+    class Model(BaseModel):
+        td: TD
+
+    d = {'a': 123}
+    m = Model(td=d)
+
+    assert m.td == d
+
+
 def test_typed_dict_non_dict_value():
     TD = TypedDict('TD', {'a': int, 'b': str})
 
@@ -68,6 +80,17 @@ def test_typed_dict_missing_keys_and_extra_keys():
 
 def test_typed_dict_invalid_value():
     TD = TypedDict('TD', {'a': int, 'b': str})
+
+    class Model(BaseModel):
+        td: TD
+
+    d = {'a': 'bar', 'b': 'foo'}
+    with pytest.raises(ValidationError):
+        Model(td=d)
+
+
+def test_non_total_typed_dict_invalid_value():
+    TD = TypedDict('TD', {'a': int, 'b': str}, total=False)
 
     class Model(BaseModel):
         td: TD
